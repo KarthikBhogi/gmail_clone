@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { format } from 'date-fns';
 import {
   Loader2,
@@ -54,6 +54,13 @@ const urgencyColors = {
   Low: 'bg-green-100 text-green-800 border-green-200',
 };
 
+const trackEvent = (eventName: string, payload: any = {}) => {
+  console.log(`[Analytics Event] ${eventName}`, {
+    timestamp: new Date().toISOString(),
+    ...payload,
+  });
+};
+
 export function WeeklyReview({ emails, onComplete, initialCarryForwardIds = [] }: WeeklyReviewProps) {
   const [data, setData] = useState<WeeklyReviewData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,59 +81,68 @@ export function WeeklyReview({ emails, onComplete, initialCarryForwardIds = [] }
   startDate.setDate(endDate.getDate() - 7);
   const dateRangeStr = `${format(startDate, 'MMM d')} - ${format(endDate, 'MMM d')}`;
 
-  useEffect(() => {
-    async function run() {
-      try {
-        setLoading(true);
-        const result = await extractWeeklyReviewData(emails);
-        setData(result);
-        const carryForwardSet = new Set(initialCarryForwardIds);
-        const hydratedActions = result.actions.map((action) => ({
-            ...action,
-            status:
-              action.status === 'Resolved'
-                ? 'resolved'
-                : action.status === 'CarryForward'
-                  ? 'carry-forward'
-                  : action.status === 'Snoozed'
-                    ? 'snoozed'
-                    : action.status === 'Dismissed'
-                      ? 'dismissed'
-                      : 'pending',
-            carriedIn: carryForwardSet.has(action.threadId),
-          } as ReviewAction));
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await extractWeeklyReviewData(emails);
+      setData(result);
+      const carryForwardSet = new Set(initialCarryForwardIds);
+      const hydratedActions = result.actions.map((action) => ({
+        ...action,
+        status:
+          action.status === 'Resolved'
+            ? 'resolved'
+            : action.status === 'CarryForward'
+              ? 'carry-forward'
+              : action.status === 'Snoozed'
+                ? 'snoozed'
+                : action.status === 'Dismissed'
+                  ? 'dismissed'
+                  : 'pending',
+        carriedIn: carryForwardSet.has(action.threadId),
+      } as ReviewAction));
 
-        const existingThreadIds = new Set(hydratedActions.map((action) => action.threadId));
-        for (const threadId of initialCarryForwardIds) {
-          if (existingThreadIds.has(threadId)) {
-            continue;
-          }
-
-          const email = emails.find((item) => item.id === threadId);
-          if (!email) {
-            continue;
-          }
-
-          hydratedActions.push({
-            threadId,
-            summary: `Follow up carried from last review: ${email.subject}`,
-            urgency: 'High',
-            confidence: 65,
-            status: 'pending',
-            carriedIn: true,
-          });
+      const existingThreadIds = new Set(hydratedActions.map((action) => action.threadId));
+      for (const threadId of initialCarryForwardIds) {
+        if (existingThreadIds.has(threadId)) {
+          continue;
         }
 
-        setActions(hydratedActions);
-      } catch (e) {
-        console.error(e);
-        setError('Failed to generate weekly review. Please try again.');
-      } finally {
-        setLoading(false);
+        const email = emails.find((item) => item.id === threadId);
+        if (!email) {
+          continue;
+        }
+
+        hydratedActions.push({
+          threadId,
+          summary: `Follow up carried from last review: ${email.subject}`,
+          urgency: 'High',
+          confidence: 65,
+          status: 'pending',
+          carriedIn: true,
+        });
       }
+
+      setActions(hydratedActions);
+      trackEvent('weekly_trigger_started');
+    } catch (e) {
+      console.error(e);
+      setError('Failed to generate weekly review. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    run();
   }, [emails, initialCarryForwardIds]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (step === 'digest' && data) {
+      trackEvent('weekly_digest_viewed', { total_themes: data.themes.length });
+    }
+  }, [step, data]);
 
   const pendingActions = useMemo(() => actions.filter((a) => a.status === 'pending'), [actions]);
   const carriedInCount = useMemo(() => actions.filter((a) => a.carriedIn).length, [actions]);
@@ -152,10 +168,26 @@ export function WeeklyReview({ emails, onComplete, initialCarryForwardIds = [] }
 
   const setActionStatus = (threadId: string, status: ActionStatus) => {
     setActions((prev) => prev.map((action) => (action.threadId === threadId ? { ...action, status } : action)));
+
+    if (status === 'resolved') trackEvent('action_item_resolved', { action_id: threadId });
+    if (status === 'dismissed') trackEvent('action_item_dismissed', { action_id: threadId });
+    if (status === 'carry-forward') trackEvent('carry_forward_selected', { action_id: threadId });
   };
 
   const setActionUrgency = (threadId: string, urgency: string) => {
-    setActions((prev) => prev.map((action) => (action.threadId === threadId ? { ...action, urgency: urgency as any } : action)));
+    setActions((prev) =>
+      prev.map((action) => {
+        if (action.threadId === threadId) {
+          trackEvent('urgency_overridden', {
+            action_id: threadId,
+            urgency_before: action.urgency,
+            urgency_after: urgency,
+          });
+          return { ...action, urgency: urgency as any };
+        }
+        return action;
+      })
+    );
   };
 
   const setActionSnooze = (threadId: string, snoozeDate: string) => {
@@ -166,7 +198,10 @@ export function WeeklyReview({ emails, onComplete, initialCarryForwardIds = [] }
     setExpandedActions((prev) => {
       const next = new Set(prev);
       if (next.has(threadId)) next.delete(threadId);
-      else next.add(threadId);
+      else {
+        next.add(threadId);
+        trackEvent('action_item_opened', { action_id: threadId });
+      }
       return next;
     });
   };
@@ -175,7 +210,10 @@ export function WeeklyReview({ emails, onComplete, initialCarryForwardIds = [] }
     setExpandedThemes((prev) => {
       const next = new Set(prev);
       if (next.has(title)) next.delete(title);
-      else next.add(title);
+      else {
+        next.add(title);
+        trackEvent('theme_card_expanded', { theme_title: title });
+      }
       return next;
     });
   };
@@ -191,6 +229,11 @@ export function WeeklyReview({ emails, onComplete, initialCarryForwardIds = [] }
       carryForwardThreadIds,
       summary,
     };
+
+    trackEvent('weekly_review_completed', {
+      resolved_count: summary.resolved,
+      carried_count: summary.carried,
+    });
 
     setSaving(false);
     onComplete(result);
@@ -245,18 +288,26 @@ export function WeeklyReview({ emails, onComplete, initialCarryForwardIds = [] }
       <div className="flex h-full items-center justify-center bg-gray-50 p-8">
         <div className="text-center max-w-md">
           <AlertCircle className="h-10 w-10 text-red-500 mx-auto mb-3" />
-          <p className="text-gray-700">{error || 'Could not load weekly review.'}</p>
-          <button
-            onClick={() =>
-              onComplete({
-                carryForwardThreadIds: initialCarryForwardIds,
-                summary: { resolved: 0, carried: initialCarryForwardIds.length, snoozed: 0, dismissed: 0 },
-              })
-            }
-            className="mt-4 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            Return to Inbox
-          </button>
+          <p className="text-gray-700 mb-6">{error || 'Could not load weekly review.'}</p>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={fetchData}
+              className="px-4 py-2 rounded-md border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium transition-colors"
+            >
+              Retry Review
+            </button>
+            <button
+              onClick={() =>
+                onComplete({
+                  carryForwardThreadIds: initialCarryForwardIds,
+                  summary: { resolved: 0, carried: initialCarryForwardIds.length, snoozed: 0, dismissed: 0 },
+                })
+              }
+              className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+            >
+              Open Chronological Inbox
+            </button>
+          </div>
         </div>
       </div>
     );
