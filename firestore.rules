@@ -1,0 +1,130 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function uidUnchanged() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() > 0 &&
+             data.email is string && isValidEmail(data.email) &&
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('timezone' in data) || data.timezone is string) &&
+             (!('scheduleConfig' in data) || data.scheduleConfig is map);
+    }
+
+    function isValidEmailThread(data) {
+      return data.userId is string && data.userId.size() > 0 &&
+             data.subject is string && data.subject.size() <= 500 &&
+             data.lastActivityAt is timestamp &&
+             (!('snippet' in data) || data.snippet is string) &&
+             (!('participants' in data) || data.participants is list) &&
+             (!('labels' in data) || data.labels is list) &&
+             (!('unreadCount' in data) || data.unreadCount is number) &&
+             (!('messages' in data) || data.messages is list);
+    }
+
+    function isValidWeeklyReview(data) {
+      return data.userId is string && data.userId.size() > 0 &&
+             data.periodStart is timestamp &&
+             data.periodEnd is timestamp &&
+             data.status in ["Draft", "Ready", "InProgress", "Completed"] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidThemeCluster(data) {
+      return data.reviewId is string && data.reviewId.size() > 0 &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.summary is string && data.summary.size() > 0 && data.summary.size() <= 2000 &&
+             data.threadIds is list &&
+             (!('pendingActionCount' in data) || data.pendingActionCount is number) &&
+             (!('unreadCount' in data) || data.unreadCount is number) &&
+             (!('hasCriticalAction' in data) || data.hasCriticalAction is bool);
+    }
+
+    function isValidActionItem(data) {
+      return data.reviewId is string && data.reviewId.size() > 0 &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.threadId is string && data.threadId.size() > 0 &&
+             data.summary is string && data.summary.size() > 0 && data.summary.size() <= 1000 &&
+             data.urgency in ["Critical", "High", "Medium", "Low"] &&
+             data.status in ["Pending", "Resolved", "CarryForward", "Snoozed", "Dismissed"] &&
+             (!('dueDate' in data) || data.dueDate is timestamp) &&
+             (!('confidence' in data) || data.confidence is number);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && hasRequiredFields(['uid', 'email']) && isValidUser(request.resource.data) && uidUnchanged();
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && uidNotModified();
+      allow delete: if isOwner(userId);
+    }
+
+    match /emailThreads/{threadId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && hasRequiredFields(['userId', 'subject', 'lastActivityAt']) && isValidEmailThread(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidEmailThread(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    match /weeklyReviews/{reviewId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && hasRequiredFields(['userId', 'periodStart', 'periodEnd', 'status', 'createdAt']) && isValidWeeklyReview(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidWeeklyReview(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    match /themeClusters/{clusterId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && hasRequiredFields(['reviewId', 'userId', 'title', 'summary', 'threadIds']) && isValidThemeCluster(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidThemeCluster(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    match /actionItems/{actionId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && hasRequiredFields(['reviewId', 'userId', 'threadId', 'summary', 'urgency', 'status']) && isValidActionItem(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidActionItem(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+  }
+}

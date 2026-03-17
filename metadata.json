@@ -1,0 +1,5 @@
+{
+  "name": "Gmail Weekly Review Assistant",
+  "description": "A Gmail-clone prototype featuring a Weekly Inbox Review Assistant to summarize themes, extract actions, and manage weekly closure.",
+  "requestFramePermissions": []
+}

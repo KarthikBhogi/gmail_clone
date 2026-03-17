@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "timezone": { "type": "string" },
+        "scheduleConfig": {
+          "type": "object",
+          "properties": {
+            "dayOfWeek": { "type": "number" },
+            "hour": { "type": "number" }
+          }
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "EmailThread": {
+      "title": "EmailThread",
+      "description": "Mock email thread data",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "subject": { "type": "string" },
+        "snippet": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastActivityAt": { "type": "string", "format": "date-time" },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "unreadCount": { "type": "number" },
+        "messages": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["userId", "subject", "lastActivityAt"]
+    },
+    "WeeklyReview": {
+      "title": "WeeklyReview",
+      "description": "A weekly review session",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "periodStart": { "type": "string", "format": "date-time" },
+        "periodEnd": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["Draft", "Ready", "InProgress", "Completed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "periodStart", "periodEnd", "status", "createdAt"]
+    },
+    "ThemeCluster": {
+      "title": "ThemeCluster",
+      "description": "A theme cluster within a weekly review",
+      "type": "object",
+      "properties": {
+        "reviewId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "threadIds": { "type": "array", "items": { "type": "string" } },
+        "pendingActionCount": { "type": "number" },
+        "unreadCount": { "type": "number" },
+        "hasCriticalAction": { "type": "boolean" }
+      },
+      "required": ["reviewId", "userId", "title", "summary", "threadIds"]
+    },
+    "ActionItem": {
+      "title": "ActionItem",
+      "description": "An action item extracted from a thread",
+      "type": "object",
+      "properties": {
+        "reviewId": { "type": "string" },
+        "userId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "summary": { "type": "string" },
+        "urgency": { "type": "string", "enum": ["Critical", "High", "Medium", "Low"] },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "confidence": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pending", "Resolved", "CarryForward", "Snoozed", "Dismissed"] }
+      },
+      "required": ["reviewId", "userId", "threadId", "summary", "urgency", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/emailThreads/{threadId}": {
+      "schema": { "$ref": "#/entities/EmailThread" },
+      "description": "Mock email threads"
+    },
+    "/weeklyReviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/WeeklyReview" },
+      "description": "Weekly review sessions"
+    },
+    "/themeClusters/{clusterId}": {
+      "schema": { "$ref": "#/entities/ThemeCluster" },
+      "description": "Theme clusters for reviews"
+    },
+    "/actionItems/{actionId}": {
+      "schema": { "$ref": "#/entities/ActionItem" },
+      "description": "Action items for reviews"
+    }
+  }
+}
