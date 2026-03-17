@@ -22,10 +22,109 @@ export interface WeeklyReviewData {
   actions: ExtractedAction[];
 }
 
+const FREE_SUMMARIZER_MODEL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6";
+
+function fallbackSummary(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return "No summary available.";
+  return clean.length > 140 ? `${clean.substring(0, 140)}...` : clean;
+}
+
+async function summarizeWithFreeModel(text: string): Promise<string> {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return "No summary available.";
+
+  try {
+    const response = await fetch(FREE_SUMMARIZER_MODEL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        inputs: clean.substring(0, 1200),
+        parameters: { max_length: 72, min_length: 20 }
+      })
+    });
+
+    if (!response.ok) {
+      return fallbackSummary(clean);
+    }
+
+    const data = await response.json();
+    if (Array.isArray(data) && typeof data[0]?.summary_text === "string") {
+      return data[0].summary_text;
+    }
+
+    return fallbackSummary(clean);
+  } catch (error) {
+    console.warn("Free summarizer request failed:", error);
+    return fallbackSummary(clean);
+  }
+}
+
+function detectUrgency(email: MockEmail): ExtractedAction["urgency"] {
+  const text = `${email.subject} ${email.snippet}`.toLowerCase();
+  if (/(urgent|asap|overdue|today|immediately|final reminder|deadline)/.test(text)) return "Critical";
+  if (/(due|tomorrow|action required|payment|submit|review)/.test(text)) return "High";
+  if (/(update|please|request|confirm|follow up)/.test(text)) return "Medium";
+  return "Low";
+}
+
+async function buildFreeModelWeeklyReview(emails: MockEmail[]): Promise<WeeklyReviewData> {
+  const buckets: Array<{ title: string; match: (email: MockEmail) => boolean }> = [
+    { title: "Finance & Payments", match: (e) => /bank|payment|invoice|trade|demat|zerodha|nse/i.test(`${e.sender} ${e.subject}`) },
+    { title: "Academics & Deadlines", match: (e) => /assignment|class|spjimr|course|quiz|attendance|submission/i.test(`${e.sender} ${e.subject}`) },
+    { title: "Promotions & Marketing", match: (e) => e.category === "promotions" || /offer|sale|discount|ajio|swiggy/i.test(`${e.sender} ${e.subject}`) }
+  ];
+
+  const groups = new Map<string, MockEmail[]>();
+  for (const email of emails) {
+    const bucket = buckets.find((b) => b.match(email));
+    const key = bucket?.title ?? "General Updates";
+    const list = groups.get(key) ?? [];
+    list.push(email);
+    groups.set(key, list);
+  }
+
+  const themes: ExtractedTheme[] = [];
+  const actions: ExtractedAction[] = [];
+
+  for (const [title, groupEmails] of groups.entries()) {
+    const combined = groupEmails
+      .slice(0, 4)
+      .map((email) => `${email.sender}: ${email.subject}. ${email.snippet}`)
+      .join(" ");
+
+    const summary = await summarizeWithFreeModel(combined);
+    const hasCriticalAction = groupEmails.some((email) => detectUrgency(email) === "Critical");
+
+    themes.push({
+      title,
+      summary,
+      threadIds: groupEmails.map((email) => email.id),
+      hasCriticalAction
+    });
+
+    groupEmails.slice(0, 3).forEach((email) => {
+      const urgency = detectUrgency(email);
+      actions.push({
+        threadId: email.id,
+        summary: `Review: ${email.subject}`,
+        urgency,
+        confidence: urgency === "Critical" ? 88 : urgency === "High" ? 80 : 72,
+        status: "Pending"
+      });
+    });
+  }
+
+  return { themes, actions };
+}
+
 export async function extractWeeklyReviewData(emails: MockEmail[]): Promise<WeeklyReviewData> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey =
+    (typeof process !== "undefined" ? (process as any).env?.GEMINI_API_KEY : undefined) ||
+    localStorage.getItem("gemini_api_key") ||
+    undefined;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not set");
+    return buildFreeModelWeeklyReview(emails);
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -111,8 +210,13 @@ export async function extractWeeklyReviewData(emails: MockEmail[]): Promise<Week
 
   const text = response.text;
   if (!text) {
-    throw new Error("No response from Gemini");
+    return buildFreeModelWeeklyReview(emails);
   }
 
-  return JSON.parse(text) as WeeklyReviewData;
+  try {
+    return JSON.parse(text) as WeeklyReviewData;
+  } catch (error) {
+    console.error("Failed to parse Gemini response, using free fallback:", error);
+    return buildFreeModelWeeklyReview(emails);
+  }
 }

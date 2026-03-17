@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { MockEmail } from '../services/mockData';
 import { format } from 'date-fns';
-import { Star, MoreVertical, Clock, CheckCircle, RotateCw, ChevronLeft, ChevronRight, Inbox as InboxIcon, Tag, Users, Info, Square, FileText, CheckSquare, Trash2 } from 'lucide-react';
+import { Star, MoreVertical, Clock, CheckCircle, RotateCw, ChevronLeft, ChevronRight, Inbox as InboxIcon, Tag, Users, Info, Square, FileText, CheckSquare, Trash2, X, Reply, Forward, Archive, Paperclip } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
@@ -10,19 +10,26 @@ interface InboxProps {
   emails: MockEmail[];
   onUpdateEmail: (id: string, updates: Partial<MockEmail>) => void;
   onDeleteEmails: (ids: Set<string>) => void;
+  onRefresh: () => Promise<void>;
   onStartReview: () => void;
 }
 
-export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onStartReview }: InboxProps) {
+export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onRefresh, onStartReview }: InboxProps) {
   const [showBanner, setShowBanner] = useState(true);
   const [activeTab, setActiveTab] = useState('primary');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const [openedEmail, setOpenedEmail] = useState<MockEmail | null>(null);
+
+  const PAGE_SIZE = 12;
 
   const displayedEmails = useMemo(() => {
     if (folder === 'starred') return emails.filter(e => e.starred);
     if (folder === 'snoozed') return [];
     if (folder === 'sent') return [];
     if (folder === 'drafts') return [];
+    if (folder === 'purchases') return emails;
     
     // Inbox tabs filtering
     if (activeTab === 'promotions') return emails.filter(e => e.category === 'promotions' || (!e.category && (e.sender.includes('AJIO') || e.sender.includes('Swiggy'))));
@@ -32,6 +39,27 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onStartRe
     // Primary tab
     return emails.filter(e => e.category === 'primary' || (!e.category && !e.sender.includes('AJIO') && !e.sender.includes('Swiggy') && !e.sender.includes('HDFC') && !e.sender.includes('Zerodha')));
   }, [emails, folder, activeTab]);
+
+  const totalPages = Math.max(1, Math.ceil(displayedEmails.length / PAGE_SIZE));
+  const pageEmails = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return displayedEmails.slice(start, end);
+  }, [currentPage, displayedEmails]);
+
+  const rangeStart = displayedEmails.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, displayedEmails.length);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedIds(new Set());
+  }, [folder, activeTab]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const toggleSelectAll = () => {
     if (selectedIds.size === displayedEmails.length && displayedEmails.length > 0) {
@@ -67,11 +95,32 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onStartRe
     setSelectedIds(new Set());
   };
 
+  const handleBulkMarkRead = () => {
+    selectedIds.forEach(id => onUpdateEmail(id, { unread: false }));
+    setSelectedIds(new Set());
+    setShowMoreActions(false);
+  };
+
+  const handleBulkMarkUnread = () => {
+    selectedIds.forEach(id => onUpdateEmail(id, { unread: true }));
+    setSelectedIds(new Set());
+    setShowMoreActions(false);
+  };
+
+  const openEmail = (email: MockEmail) => {
+    markAsRead(email.id);
+    setOpenedEmail({ ...email, unread: false });
+  };
+
+  const closeEmail = () => {
+    setOpenedEmail(null);
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-white">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 relative">
           <button onClick={toggleSelectAll} className="p-2 hover:bg-gray-100 rounded text-gray-600">
             {selectedIds.size > 0 && selectedIds.size === displayedEmails.length ? (
               <CheckSquare className="h-4 w-4 text-blue-600" />
@@ -83,12 +132,19 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onStartRe
               <Square className="h-4 w-4" />
             )}
           </button>
-          <button className="p-2 hover:bg-gray-100 rounded text-gray-600">
+          <button onClick={onRefresh} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="Refresh">
             <RotateCw className="h-4 w-4" />
           </button>
-          <button className="p-2 hover:bg-gray-100 rounded text-gray-600">
+          <button onClick={() => setShowMoreActions(prev => !prev)} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="More actions">
             <MoreVertical className="h-4 w-4" />
           </button>
+          {showMoreActions && (
+            <div className="absolute mt-12 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-44 p-1">
+              <button onClick={handleBulkMarkRead} disabled={selectedIds.size === 0} className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 disabled:opacity-40">Mark selected as read</button>
+              <button onClick={handleBulkMarkUnread} disabled={selectedIds.size === 0} className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 disabled:opacity-40">Mark selected as unread</button>
+              <button onClick={handleDelete} disabled={selectedIds.size === 0} className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 text-red-600 disabled:opacity-40">Delete selected</button>
+            </div>
+          )}
           
           {selectedIds.size > 0 && (
             <div className="flex items-center ml-4 pl-4 border-l border-gray-200">
@@ -99,12 +155,22 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onStartRe
           )}
         </div>
         <div className="flex items-center gap-4 text-sm text-gray-500">
-          <span>{displayedEmails.length > 0 ? `1-${displayedEmails.length} of ${displayedEmails.length}` : '0 of 0'}</span>
+          <span>{displayedEmails.length > 0 ? `${rangeStart}-${rangeEnd} of ${displayedEmails.length}` : '0 of 0'}</span>
           <div className="flex items-center gap-1">
-            <button className="p-2 hover:bg-gray-100 rounded text-gray-400">
+            <button 
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="p-2 hover:bg-gray-100 rounded text-gray-600 disabled:text-gray-300 disabled:hover:bg-transparent"
+              title="Previous page"
+            >
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <button className="p-2 hover:bg-gray-100 rounded text-gray-600">
+            <button 
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages || displayedEmails.length === 0}
+              className="p-2 hover:bg-gray-100 rounded text-gray-600 disabled:text-gray-300 disabled:hover:bg-transparent"
+              title="Next page"
+            >
               <ChevronRight className="h-5 w-5" />
             </button>
           </div>
@@ -207,10 +273,10 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onStartRe
               No emails to display.
             </div>
           ) : (
-            displayedEmails.map((email) => (
+            pageEmails.map((email) => (
               <div 
                 key={email.id} 
-                onClick={() => markAsRead(email.id)}
+                onClick={() => openEmail(email)}
                 className={cn("flex flex-col px-4 py-2 hover:shadow-[inset_1px_0_0_#dadce0,inset_-1px_0_0_#dadce0,0_1px_2px_0_rgba(60,64,67,.3),0_1px_3px_1px_rgba(60,64,67,.15)] cursor-pointer group transition-shadow", email.unread ? 'bg-white font-semibold text-gray-900' : 'bg-gray-50/50 text-gray-600', selectedIds.has(email.id) ? 'bg-blue-50/30' : '')}
               >
                 <div className="flex items-center">
@@ -246,6 +312,86 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onStartRe
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {openedEmail && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            className="absolute inset-0 z-20 bg-white"
+          >
+            <div className="h-full flex flex-col">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2">
+                <div className="flex items-center gap-2">
+                  <button onClick={closeEmail} className="p-2 rounded-full hover:bg-gray-100 text-gray-600" title="Close message">
+                    <X className="h-4 w-4" />
+                  </button>
+                  <button className="p-2 rounded-full hover:bg-gray-100 text-gray-600" title="Archive">
+                    <Archive className="h-4 w-4" />
+                  </button>
+                  <button className="p-2 rounded-full hover:bg-gray-100 text-gray-600" title="Reply">
+                    <Reply className="h-4 w-4" />
+                  </button>
+                  <button className="p-2 rounded-full hover:bg-gray-100 text-gray-600" title="Forward">
+                    <Forward className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="text-xs text-gray-500">
+                  {format(new Date(openedEmail.date), 'EEE, MMM d, yyyy • h:mm a')}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-8 py-6">
+                <h2 className="text-2xl font-semibold text-gray-900 mb-3">{openedEmail.subject}</h2>
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">{openedEmail.sender}</p>
+                    <p className="text-xs text-gray-500">to me</p>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdateEmail(openedEmail.id, { starred: !openedEmail.starred });
+                      setOpenedEmail({ ...openedEmail, starred: !openedEmail.starred });
+                    }}
+                    className="p-2 rounded-full hover:bg-gray-100"
+                    title="Star"
+                  >
+                    <Star className={cn('h-4 w-4', openedEmail.starred ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300')} />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {openedEmail.messages.map((message) => (
+                    <div key={message.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-gray-800">{message.sender}</span>
+                        <span className="text-xs text-gray-500">{format(new Date(message.date), 'MMM d, h:mm a')}</span>
+                      </div>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap leading-6">{message.body || openedEmail.snippet}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {openedEmail.attachments && openedEmail.attachments.length > 0 && (
+                  <div className="mt-6">
+                    <p className="text-sm font-medium text-gray-800 mb-2">Attachments</p>
+                    <div className="flex flex-wrap gap-2">
+                      {openedEmail.attachments.map((att, idx) => (
+                        <button key={`${att.name}-${idx}`} className="inline-flex items-center gap-2 border border-gray-200 rounded-full px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                          <Paperclip className="h-3.5 w-3.5 text-gray-500" />
+                          {att.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

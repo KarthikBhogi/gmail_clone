@@ -5,8 +5,6 @@ import { Loader2, AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Calendar
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
-import { db, auth } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 interface WeeklyReviewProps {
   emails: MockEmail[];
@@ -46,48 +44,16 @@ export function WeeklyReview({ emails, onComplete }: WeeklyReviewProps) {
   }, [emails]);
 
   const handleComplete = async () => {
-    if (!auth.currentUser || !data) return;
+    if (!data) return;
     
     setSaving(true);
     try {
-      // Save review session
-      const reviewRef = await addDoc(collection(db, 'weeklyReviews'), {
-        userId: auth.currentUser.uid,
-        periodStart: new Date('2026-03-08T00:00:00Z'),
-        periodEnd: new Date('2026-03-14T23:59:59Z'),
-        status: 'Completed',
-        createdAt: serverTimestamp()
-      });
-
-      // Save themes
-      for (const theme of data.themes) {
-        await addDoc(collection(db, 'themeClusters'), {
-          reviewId: reviewRef.id,
-          userId: auth.currentUser.uid,
-          title: theme.title,
-          summary: theme.summary,
-          threadIds: theme.threadIds,
-          hasCriticalAction: theme.hasCriticalAction
-        });
-      }
-
-      // Save actions
-      for (const action of actions) {
-        await addDoc(collection(db, 'actionItems'), {
-          reviewId: reviewRef.id,
-          userId: auth.currentUser.uid,
-          threadId: action.threadId,
-          summary: action.summary,
-          urgency: action.urgency,
-          status: action.status || 'Pending',
-          confidence: action.confidence
-        });
-      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       onComplete();
     } catch (err) {
-      console.error("Error saving review to Firestore:", err);
-      alert("Failed to save review. Please try again.");
+      console.error('Error closing review:', err);
+      alert('Failed to close review. Please try again.');
     } finally {
       setSaving(false);
     }
