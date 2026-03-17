@@ -12,10 +12,28 @@ interface InboxProps {
   onDeleteEmails: (ids: Set<string>) => void;
   onRefresh: () => Promise<void>;
   onStartReview: () => void;
+  weeklyReviewReady: boolean;
+  weeklyReviewWindowOpen: boolean;
+  weeklyReviewPreview: string;
+  onDismissReviewBanner: () => void;
+  onSnoozeReviewBanner: () => void;
+  onRestoreReviewBanner: () => void;
 }
 
-export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onRefresh, onStartReview }: InboxProps) {
-  const [showBanner, setShowBanner] = useState(true);
+export function Inbox({
+  folder,
+  emails,
+  onUpdateEmail,
+  onDeleteEmails,
+  onRefresh,
+  onStartReview,
+  weeklyReviewReady,
+  weeklyReviewWindowOpen,
+  weeklyReviewPreview,
+  onDismissReviewBanner,
+  onSnoozeReviewBanner,
+  onRestoreReviewBanner,
+}: InboxProps) {
   const [activeTab, setActiveTab] = useState('primary');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
@@ -223,7 +241,7 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onRefresh
       <div className="flex-1 overflow-y-auto">
         {/* Trigger Banner */}
         <AnimatePresence>
-          {showBanner && folder === 'inbox' && activeTab === 'primary' && (
+          {weeklyReviewReady && folder === 'inbox' && activeTab === 'primary' && (
             <motion.div 
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -237,19 +255,19 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onRefresh
                 <div>
                   <h3 className="text-lg font-medium text-blue-900">Your Weekly Inbox Review is Ready</h3>
                   <p className="text-sm text-blue-700 mt-1">
-                    Review {emails.length} conversations from the past week
+                    {weeklyReviewPreview}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <button 
-                  onClick={() => setShowBanner(false)}
+                  onClick={onDismissReviewBanner}
                   className="px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 rounded-md transition-colors"
                 >
                   Dismiss
                 </button>
                 <button 
-                  onClick={() => setShowBanner(false)}
+                  onClick={onSnoozeReviewBanner}
                   className="px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 rounded-md transition-colors flex items-center gap-2"
                 >
                   <Clock className="h-4 w-4" />
@@ -262,6 +280,22 @@ export function Inbox({ folder, emails, onUpdateEmail, onDeleteEmails, onRefresh
                   Start Review
                 </button>
               </div>
+            </motion.div>
+          )}
+          {!weeklyReviewReady && weeklyReviewWindowOpen && folder === 'inbox' && activeTab === 'primary' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-gray-50 border-b border-gray-100 p-3 flex items-center justify-between"
+            >
+              <p className="text-xs text-gray-600">Weekly reminder hidden. You can restore it anytime.</p>
+              <button
+                onClick={onRestoreReviewBanner}
+                className="px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 rounded-md"
+              >
+                Show Reminder
+              </button>
             </motion.div>
           )}
         </AnimatePresence>

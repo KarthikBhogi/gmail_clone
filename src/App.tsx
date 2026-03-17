@@ -1,9 +1,41 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Inbox } from './components/Inbox';
-import { WeeklyReview } from './components/WeeklyReview';
+import { ReviewCompletionResult, WeeklyReview } from './components/WeeklyReview';
 import { Menu, Search, Settings, HelpCircle, Grid, Inbox as InboxIcon, Send, File, CheckSquare, Star, Clock, Tag, Plus, ChevronDown, X, PenLine } from 'lucide-react';
 import { cn } from './lib/utils';
 import { mockEmails as initialEmails, MockEmail } from './services/mockData';
+
+type WeeklyReviewSchedule = {
+  enabled: boolean;
+  dayOfWeek: number;
+  hourOfDay: number;
+};
+
+const DEFAULT_WEEKLY_SCHEDULE: WeeklyReviewSchedule = {
+  enabled: true,
+  dayOfWeek: 5,
+  hourOfDay: 17,
+};
+
+function getTodayKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function isInsideWeeklyReviewWindow(date: Date, schedule: WeeklyReviewSchedule): boolean {
+  if (!schedule.enabled) {
+    return false;
+  }
+
+  if (date.getDay() !== schedule.dayOfWeek) {
+    return false;
+  }
+
+  const currentHour = date.getHours() + date.getMinutes() / 60;
+  return currentHour >= schedule.hourOfDay && currentHour < schedule.hourOfDay + 6;
+}
 
 export default function App() {
   type MailFolder = 'inbox' | 'starred' | 'snoozed' | 'sent' | 'drafts' | 'weekly-review' | 'purchases';
@@ -21,6 +53,38 @@ export default function App() {
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
   const [labels, setLabels] = useState<{ name: string; color: string }[]>([]);
+  const [weeklyReviewSchedule, setWeeklyReviewSchedule] = useState<WeeklyReviewSchedule>(() => {
+    try {
+      const raw = localStorage.getItem('weekly_review_schedule');
+      if (!raw) return DEFAULT_WEEKLY_SCHEDULE;
+      const parsed = JSON.parse(raw) as WeeklyReviewSchedule;
+      return {
+        enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_WEEKLY_SCHEDULE.enabled,
+        dayOfWeek: Number.isFinite(parsed.dayOfWeek) ? parsed.dayOfWeek : DEFAULT_WEEKLY_SCHEDULE.dayOfWeek,
+        hourOfDay: Number.isFinite(parsed.hourOfDay) ? parsed.hourOfDay : DEFAULT_WEEKLY_SCHEDULE.hourOfDay,
+      };
+    } catch {
+      return DEFAULT_WEEKLY_SCHEDULE;
+    }
+  });
+  const [carryForwardThreadIds, setCarryForwardThreadIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('weekly_review_carry_forward');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const [bannerDismissedDate, setBannerDismissedDate] = useState<string | null>(() => localStorage.getItem('weekly_review_banner_dismissed_date'));
+  const [bannerSnoozedUntil, setBannerSnoozedUntil] = useState<string | null>(() => localStorage.getItem('weekly_review_banner_snoozed_until'));
+
+  const now = new Date();
+  const todayKey = getTodayKey(now);
+  const reviewWindowOpen = isInsideWeeklyReviewWindow(now, weeklyReviewSchedule);
+  const snoozeActive = Boolean(bannerSnoozedUntil && new Date(bannerSnoozedUntil) > now);
+  const isReviewBannerReady = reviewWindowOpen && bannerDismissedDate !== todayKey && !snoozeActive;
 
   const openExternal = (url: string, label: string) => {
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -93,6 +157,47 @@ export default function App() {
     const timer = window.setTimeout(() => setStatusMessage(''), 3000);
     return () => window.clearTimeout(timer);
   }, [statusMessage]);
+
+  useEffect(() => {
+    localStorage.setItem('weekly_review_schedule', JSON.stringify(weeklyReviewSchedule));
+  }, [weeklyReviewSchedule]);
+
+  useEffect(() => {
+    localStorage.setItem('weekly_review_carry_forward', JSON.stringify(carryForwardThreadIds));
+  }, [carryForwardThreadIds]);
+
+  useEffect(() => {
+    if (bannerDismissedDate) localStorage.setItem('weekly_review_banner_dismissed_date', bannerDismissedDate);
+    else localStorage.removeItem('weekly_review_banner_dismissed_date');
+  }, [bannerDismissedDate]);
+
+  useEffect(() => {
+    if (bannerSnoozedUntil) localStorage.setItem('weekly_review_banner_snoozed_until', bannerSnoozedUntil);
+    else localStorage.removeItem('weekly_review_banner_snoozed_until');
+  }, [bannerSnoozedUntil]);
+
+  const dismissReviewBanner = () => {
+    setBannerDismissedDate(getTodayKey(new Date()));
+    setStatusMessage('Weekly review reminder dismissed for today.');
+  };
+
+  const snoozeReviewBanner = () => {
+    const until = new Date();
+    until.setHours(until.getHours() + 2);
+    setBannerSnoozedUntil(until.toISOString());
+    setStatusMessage('Weekly review reminder snoozed for 2 hours.');
+  };
+
+  const restoreReviewBanner = () => {
+    setBannerDismissedDate(null);
+    setBannerSnoozedUntil(null);
+  };
+
+  const handleWeeklyReviewComplete = (result: ReviewCompletionResult) => {
+    setCarryForwardThreadIds(result.carryForwardThreadIds);
+    setCurrentFolder('inbox');
+    setStatusMessage(`Weekly review saved: ${result.summary.resolved} resolved, ${result.summary.carried} carried.`);
+  };
 
   return (
     <div className="flex flex-col h-screen bg-white text-gray-900 font-sans overflow-hidden">
@@ -328,7 +433,11 @@ export default function App() {
               <p>Loading your emails...</p>
             </div>
           ) : currentFolder === 'weekly-review' ? (
-              <WeeklyReview emails={filteredEmails} onComplete={() => setCurrentFolder('inbox')} />
+              <WeeklyReview
+                emails={filteredEmails}
+                initialCarryForwardIds={carryForwardThreadIds}
+                onComplete={handleWeeklyReviewComplete}
+              />
           ) : (
             <Inbox 
               folder={currentFolder} 
@@ -336,7 +445,13 @@ export default function App() {
               onUpdateEmail={handleUpdateEmail}
               onDeleteEmails={handleDeleteEmails}
               onRefresh={refreshEmails}
-              onStartReview={() => setCurrentFolder('weekly-review')} 
+              onStartReview={() => setCurrentFolder('weekly-review')}
+              weeklyReviewReady={isReviewBannerReady}
+              weeklyReviewWindowOpen={reviewWindowOpen}
+              weeklyReviewPreview={`${filteredEmails.length} conversations • ${carryForwardThreadIds.length} carry-forward`}
+              onDismissReviewBanner={dismissReviewBanner}
+              onSnoozeReviewBanner={snoozeReviewBanner}
+              onRestoreReviewBanner={restoreReviewBanner}
             />
           )}
         </main>
@@ -365,6 +480,53 @@ export default function App() {
       {showSettingsPanel && (
         <div className="absolute right-20 top-20 w-72 bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-4 space-y-3">
           <h3 className="text-sm font-semibold text-gray-800">Quick settings</h3>
+          <div className="space-y-2 border border-gray-200 rounded-lg p-3">
+            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Weekly review schedule</p>
+            <label className="flex items-center justify-between text-sm text-gray-700">
+              Enable reminder
+              <input
+                type="checkbox"
+                checked={weeklyReviewSchedule.enabled}
+                onChange={(e) => setWeeklyReviewSchedule((prev) => ({ ...prev, enabled: e.target.checked }))}
+              />
+            </label>
+            <label className="block text-xs text-gray-600">
+              Day
+              <select
+                value={weeklyReviewSchedule.dayOfWeek}
+                onChange={(e) => setWeeklyReviewSchedule((prev) => ({ ...prev, dayOfWeek: Number(e.target.value) }))}
+                className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+              >
+                <option value={1}>Monday</option>
+                <option value={2}>Tuesday</option>
+                <option value={3}>Wednesday</option>
+                <option value={4}>Thursday</option>
+                <option value={5}>Friday</option>
+                <option value={6}>Saturday</option>
+                <option value={0}>Sunday</option>
+              </select>
+            </label>
+            <label className="block text-xs text-gray-600">
+              Time
+              <select
+                value={weeklyReviewSchedule.hourOfDay}
+                onChange={(e) => setWeeklyReviewSchedule((prev) => ({ ...prev, hourOfDay: Number(e.target.value) }))}
+                className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+              >
+                <option value={9}>09:00</option>
+                <option value={12}>12:00</option>
+                <option value={15}>15:00</option>
+                <option value={17}>17:00</option>
+                <option value={19}>19:00</option>
+              </select>
+            </label>
+            <button
+              onClick={restoreReviewBanner}
+              className="w-full text-left px-3 py-2 rounded-md hover:bg-gray-100 text-sm text-gray-700"
+            >
+              Show weekly banner now
+            </button>
+          </div>
           <button
             onClick={() => setSearchQuery('')}
             className="w-full text-left px-3 py-2 rounded-md hover:bg-gray-100 text-sm text-gray-700"

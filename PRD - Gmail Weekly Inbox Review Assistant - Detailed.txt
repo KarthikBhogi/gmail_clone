@@ -1,0 +1,477 @@
+# Product Requirements Document (Detailed)
+
+## Product
+Gmail Weekly Inbox Review Assistant (for Gmail Clone Prototype)
+
+## Document Control
+- Version: 2.0 (Detailed Prototype PRD)
+- Date: 2026-03-18
+- Status: Ready for design and prototype build
+- Based on source documents:
+  - `Acad Group 2_DPM_Submission Workbook.pdf`
+  - `GMAIL - DPM (1).pdf`
+  - `PRD - Gmail Weekly Inbox Review Assistant.pdf`
+
+---
+
+## 1. Executive Summary
+This PRD defines a detailed, prototype-ready specification for a Gmail-clone feature called **Weekly Inbox Review Assistant**. The feature helps high-volume knowledge workers complete a structured weekly inbox closure by:
+- summarizing weekly communication into themes,
+- extracting and ranking actionable items,
+- enabling quick in-flow execution,
+- and carrying unresolved work into the next cycle.
+
+The solution addresses the identified JTBD gap where Gmail currently provides fragmented tools (labels, stars, nudges, search, manual Gemini prompts) but not a unified weekly review workflow.
+
+---
+
+## 2. Problem Statement
+### 2.1 Core User Problem
+Users who receive high email volume experience:
+- hidden response debt,
+- uncertainty about urgency,
+- context reconstruction fatigue,
+- and lack of closure at week-end.
+
+### 2.2 Why Existing Gmail Behavior Is Not Enough
+Current capabilities (threads, stars, labels, filters, nudges, per-thread summaries) are useful but disconnected. The user must manually stitch these together, which is slow and cognitively expensive.
+
+### 2.3 Opportunity
+Create a native weekly review workflow that transforms inbox management from a reactive scroll/reply loop into a proactive review-prioritize-act-close cycle.
+
+---
+
+## 3. Product Vision and Strategic Fit
+### 3.1 Vision
+Transform Gmail from an email repository into a proactive productivity system that enables weekly closure with confidence.
+
+### 3.2 Strategic Fit
+- Defends against premium layer competitors (Superhuman, Shortwave) that monetize workflow efficiency on top of Gmail infrastructure.
+- Strengthens Workspace/Gemini value proposition via recurring utility.
+- Aligns with Google mission: making information not just accessible, but useful.
+
+---
+
+## 4. Target User and JTBD
+### 4.1 Primary Persona
+**Rahul Mehta (Global CTO archetype)**
+- Age: 40-50
+- Work style: async-heavy, multi-stakeholder, high thread complexity
+- Behavior: conducts end-of-week inbox review to prepare next week
+
+### 4.2 JTBD (Selected)
+When I conduct a weekly review of my inbox to audit emails received during the week,
+I want to receive a consolidated summary that categorizes threads by themes, identifies pending responses, and ranks tasks by urgency,
+So I can close urgent deliverables and start the next week with full context.
+
+---
+
+## 5. Goals, Non-Goals, and Success Criteria
+### 5.1 Product Goals
+- Reduce weekly inbox review effort and ambiguity.
+- Increase review completion and confidence of closure.
+- Minimize context switching between email, calendar, and task capture.
+- Preserve user control over AI recommendations.
+
+### 5.2 Non-Goals (Prototype)
+- No full backend integration with live Gmail APIs.
+- No multi-language NLP support in v1 prototype.
+- No real enterprise admin console in prototype.
+- No autonomous action execution without user confirmation.
+
+### 5.3 North Star Metric
+- **Weekly Review Completion Rate** = % users who start weekly review and reach complete state.
+
+### 5.4 Key Supporting Metrics
+- Trigger Start Rate
+- Digest Comprehension Rate
+- Action Coverage Rate
+- AI Acceptance Rate
+- Time to Closure
+- Closure Confidence Proxy (re-open behavior)
+
+---
+
+## 6. Scope for Gmail-Clone Prototype
+### 6.1 In Scope
+- Weekly trigger banner
+- Weekly digest dashboard
+- Action extraction + urgency ranking panel
+- Quick resolve inline actions
+- Carry-forward and review completion flow
+- Basic settings for schedule and review window
+- Demo-safe seed dataset and deterministic AI simulation logic
+
+### 6.2 Out of Scope (for prototype demo)
+- Real OAuth permissions flow
+- Real inbox sync with external mail servers
+- Full user account management
+- Production-level ML serving stack
+
+---
+
+## 7. Experience Principles
+- **Clarity first:** user should understand weekly state in under 60 seconds.
+- **Actionability over novelty:** every AI insight should support a user decision.
+- **Human in control:** user can override urgency and dismiss suggestions.
+- **Low friction:** minimize navigation jumps and page reloads.
+- **Closure by design:** unresolved items must be handled explicitly before completion.
+
+---
+
+## 8. End-to-End User Journey (Usage Phase)
+1. User sees weekly trigger at scheduled time.
+2. User opens one-page themed digest.
+3. User reviews prioritized action list with urgency badges.
+4. User executes quick actions inline (reply/delegate/schedule/task).
+5. User decides carry-forward/snooze/dismiss for unresolved items.
+6. User completes review and sees closure summary.
+
+---
+
+## 9. Detailed Functional Requirements
+
+## 9.1 Feature 1: Smart Weekly Trigger
+### User Story
+As an executive opening Gmail at week-end, I want to see that my weekly review is ready so I can confidently begin closure.
+
+### Functional Requirements
+- FR1.1 System generates one review object per user per selected review period.
+- FR1.2 Default schedule is Friday 16:00 local timezone.
+- FR1.3 Trigger banner appears at top of inbox during review window.
+- FR1.4 Banner shows period, conversations count, and pending action count.
+- FR1.5 User actions: Start Review, Snooze, Dismiss.
+- FR1.6 Snooze options: +24h, next business day, custom date.
+- FR1.7 If dismissed, review remains accessible from side navigation "Weekly Review".
+
+### UI Content (Prototype Copy)
+- Header: "Your Weekly Inbox Review is Ready"
+- Subtext: "Review 42 conversations and 5 pending actions from Mar 8 - Mar 14"
+- CTAs: Start Review | Snooze | Dismiss
+
+### States
+- Loading: skeleton banner within inbox header.
+- Empty: no banner outside configured window.
+- Error: fallback message + "Open Weekly Review" button.
+
+### Acceptance Criteria
+- AC1.1 Banner visible within 1 second of inbox load in active window.
+- AC1.2 Banner visible above fold on 1366x768 viewport.
+- AC1.3 Clicking Start Review opens digest dashboard without full reload.
+
+---
+
+## 9.2 Feature 2: One-Page Themed Digest
+### User Story
+As a user starting review, I want a structured weekly summary grouped by themes so I can quickly understand what happened.
+
+### Functional Requirements
+- FR2.1 Digest opens in dedicated review workspace.
+- FR2.2 System clusters threads into themes (project/stakeholder/admin/etc.).
+- FR2.3 Each theme card shows:
+  - title,
+  - short summary,
+  - thread count,
+  - pending action count,
+  - unread count,
+  - risk flag (if any critical action exists).
+- FR2.4 Theme cards are mutually exclusive for prototype dataset.
+- FR2.5 User can expand card to view top threads.
+- FR2.6 "Show source threads" link always available.
+
+### UX Rules
+- Max one scroll for overview section at 1080p.
+- Progressive disclosure: overview first, details on expand.
+
+### States
+- Loading: card skeletons.
+- Low data: show "No notable themes this week" + top senders summary.
+- Error: retry and open fallback chronological list.
+
+### Acceptance Criteria
+- AC2.1 User can identify top 3 themes in under 60 seconds (usability target).
+- AC2.2 Each theme card includes summary + action indicator.
+- AC2.3 Opening/closing cards does not navigate away.
+
+---
+
+## 9.3 Feature 3: Action Items and Urgency Ranking
+### User Story
+As a manager, I want a prioritized action list with urgency levels so I know what to do now versus later.
+
+### Functional Requirements
+- FR3.1 System extracts explicit/implicit actions from threads.
+- FR3.2 Urgency score uses weighted signals:
+  - deadline proximity,
+  - sender importance,
+  - explicit ask language,
+  - thread activity recency,
+  - unresolved follow-up age.
+- FR3.3 Urgency buckets: Critical, High, Medium, Low.
+- FR3.4 Each item shows one-line summary + source thread link.
+- FR3.5 User can override urgency level.
+- FR3.6 User can dismiss false positives.
+- FR3.7 Overrides are logged as feedback signals.
+
+### Urgency Scoring (Prototype Heuristic)
+- Critical: deadline <= 24h OR escalation signal present
+- High: deadline <= 3 days OR sender priority high + unresolved ask
+- Medium: no hard deadline but actionable request exists
+- Low: informational follow-up, optional task
+
+### States
+- Empty actions: "No pending actions identified".
+- Low confidence: show confidence indicator + suggest source check.
+
+### Acceptance Criteria
+- AC3.1 Items sorted by urgency desc by default.
+- AC3.2 Source thread opens in one click.
+- AC3.3 User override persists in current review session.
+
+---
+
+## 9.4 Feature 4: One-Tap Quick Resolve
+### User Story
+As a user reviewing actions, I want to execute replies and follow-ups inline so I can resolve tasks without context switching.
+
+### Functional Requirements
+- FR4.1 Every action item includes quick actions:
+  - Reply,
+  - Delegate/Forward,
+  - Schedule,
+  - Add to Tasks,
+  - Mark Resolved.
+- FR4.2 Reply opens inline compose drawer with thread context preview.
+- FR4.3 Schedule opens mini scheduler panel with suggested time slots.
+- FR4.4 Add to Tasks creates a task object linked to thread ID.
+- FR4.5 Mark Resolved updates status and removes item from pending list.
+- FR4.6 Undo available for 10 seconds for destructive actions.
+
+### States
+- Sending: inline spinner and disabled send button.
+- Success: green resolved check + item transition out.
+- Failure: retry with preserved draft.
+
+### Acceptance Criteria
+- AC4.1 No full page reload for any quick action.
+- AC4.2 Action state updates within 300 ms after confirmation.
+- AC4.3 User position in list is preserved after action completion.
+
+---
+
+## 9.5 Feature 5: Follow-up Tracker and Carry-Forward
+### User Story
+As a user ending review, I want explicit carry-forward decisions so unresolved work is not lost.
+
+### Functional Requirements
+- FR5.1 Completion step shows unresolved actions summary.
+- FR5.2 Per-item options: Carry Forward, Snooze to Date, Dismiss.
+- FR5.3 Bulk apply actions supported.
+- FR5.4 Unresolved defaults to Carry Forward unless changed.
+- FR5.5 Carry-forward items appear pinned in next review period.
+- FR5.6 Complete Weekly Review requires explicit confirmation.
+- FR5.7 Completion toast shows session outcomes (resolved/carry-forward/snoozed).
+
+### Acceptance Criteria
+- AC5.1 User cannot complete without status decision for all unresolved items.
+- AC5.2 Next review includes previous carry-forward list at top.
+- AC5.3 Completion summary is visible and downloadable (prototype JSON/CSV optional).
+
+---
+
+## 10. Information Architecture and Screen Inventory (Prototype)
+### 10.1 Main Navigation
+- Inbox (default)
+- Weekly Review
+- Sent
+- Drafts
+- Tasks (lightweight)
+- Settings
+
+### 10.2 Screens
+- S1: Inbox with weekly trigger banner
+- S2: Weekly Review Dashboard (themes + action panel)
+- S3: Source Thread detail overlay
+- S4: Inline Compose / Delegate / Schedule modules
+- S5: Review Completion and carry-forward modal
+- S6: Weekly Review Settings
+
+### 10.3 Core Components
+- TriggerBanner
+- ThemeCard
+- ActionItemRow
+- UrgencyBadge
+- QuickResolveBar
+- CarryForwardTable
+- CompletionSummaryToast
+
+---
+
+## 11. Data Model (Prototype)
+### 11.1 Entities
+- User
+  - user_id, timezone, schedule_config
+- EmailThread
+  - thread_id, participants, last_activity_at, labels, unread_count
+- WeeklyReview
+  - review_id, user_id, period_start, period_end, status
+- ThemeCluster
+  - cluster_id, review_id, title, summary, thread_ids[]
+- ActionItem
+  - action_id, review_id, thread_id, summary, urgency, due_date, confidence, status
+- CarryForwardItem
+  - cf_id, action_id, next_review_id, reason, snooze_date
+- UserFeedback
+  - feedback_id, action_id, original_urgency, new_urgency, action_type
+
+### 11.2 Status Enums
+- Review status: Draft, Ready, InProgress, Completed
+- Action status: Pending, Resolved, CarryForward, Snoozed, Dismissed
+
+---
+
+## 12. Business Rules and Logic
+- BR1: One active review per user per period.
+- BR2: Trigger can appear only within configured schedule window.
+- BR3: Critical items always appear above non-critical (unless manually re-sorted).
+- BR4: Completing review auto-generates carry-forward package for next period.
+- BR5: Manual urgency overrides take precedence over model score in UI.
+- BR6: No automated outbound send without explicit user action.
+
+---
+
+## 13. Non-Functional Requirements
+### 13.1 Performance
+- Inbox + trigger render: <= 1.0s from page load (prototype target)
+- Digest load: <= 2.0s with mock dataset (200 threads)
+- Inline action update latency: <= 300 ms UI response
+
+### 13.2 Reliability
+- Graceful fallback when AI extraction unavailable.
+- Preserve drafts on action failure.
+
+### 13.3 Accessibility
+- WCAG AA contrast for urgency badges + text labels (no color-only meaning).
+- Full keyboard navigation for review actions.
+- Screen-reader labels for all CTA buttons and status changes.
+
+### 13.4 Privacy and Responsible AI
+- Explicit opt-in required for weekly review feature.
+- Explainability links: "Why marked urgent?" and "Show source email".
+- Confidence indicator per generated summary/action.
+- Neutral language (no confirm-shaming or anxiety-based nudging).
+
+---
+
+## 14. Analytics and Event Tracking
+### 14.1 Event Taxonomy
+- weekly_trigger_shown
+- weekly_trigger_started
+- weekly_trigger_snoozed
+- weekly_digest_viewed
+- theme_card_expanded
+- action_item_opened
+- action_item_resolved
+- urgency_overridden
+- action_item_dismissed
+- carry_forward_selected
+- weekly_review_completed
+
+### 14.2 Event Payload (minimum)
+- user_id (hashed in production)
+- review_id
+- timestamp
+- screen_name
+- action_id (if applicable)
+- urgency_before / urgency_after
+
+### 14.3 Metric Mapping
+- Completion Rate = weekly_review_completed / weekly_trigger_started
+- Start Rate = weekly_trigger_started / weekly_trigger_shown
+- AI Acceptance = no override actions / total ai-tagged actions
+
+---
+
+## 15. Prototype Technical Approach (Recommended)
+### 15.1 Frontend
+- Gmail-like inbox shell with two-pane layout.
+- State management for review session and quick actions.
+- Deterministic mock AI outputs (seeded) for stable demo behavior.
+
+### 15.2 Backend/Mock Service
+- JSON-based seed dataset with 4 weeks of email threads.
+- Rule-based action extraction + urgency service for prototype.
+- Session storage for user overrides and carry-forward simulation.
+
+### 15.3 Why This Approach
+- Fast to build for demonstration.
+- Reproducible demo outcomes.
+- Clear separation between UX value and production ML complexity.
+
+---
+
+## 16. Release Plan and Milestones
+### Phase 1: UX Foundation (Week 1)
+- Inbox shell, trigger banner, digest layout, theme cards
+
+### Phase 2: Prioritization Core (Week 2)
+- Action extraction logic, urgency badges, source thread drill-down
+
+### Phase 3: Execution + Closure (Week 3)
+- Quick resolve modules, carry-forward workflow, completion summary
+
+### Phase 4: Instrumentation + Polish (Week 4)
+- Event tracking, empty/error states, accessibility and demo script
+
+---
+
+## 17. Test Plan (Prototype UAT)
+### 17.1 Must-Pass Functional Scenarios
+- T1 Trigger appears in schedule window.
+- T2 Start Review opens digest correctly.
+- T3 Themes render with counts and summaries.
+- T4 Urgent item links to source thread.
+- T5 Override urgency updates immediately.
+- T6 Quick reply resolves an item and updates list.
+- T7 Carry-forward item appears in next week simulation.
+- T8 Complete review blocked until unresolved items receive status.
+
+### 17.2 Edge Cases
+- E1 No actionable items in week.
+- E2 All items critical (sort and readability).
+- E3 AI extraction service failure fallback.
+- E4 Network lag during send/save action.
+- E5 User dismisses trigger and reopens from nav.
+
+---
+
+## 18. Risks and Mitigations
+- Risk: Urgency misclassification reduces trust.
+  - Mitigation: confidence indicator, explainability, overrides.
+- Risk: Prompt fatigue from reminders.
+  - Mitigation: weekly cap, snooze controls, quiet hours.
+- Risk: Privacy concerns about email analysis.
+  - Mitigation: opt-in, transparent scope, settings visibility.
+- Risk: Feature complexity harms adoption.
+  - Mitigation: progressive disclosure and strong defaults.
+
+---
+
+## 19. Responsibility Guardrails (SHIFT-aligned)
+- Keep completion status private by default.
+- Avoid manipulative copy and fear framing.
+- Enforce human confirmation for consequential actions.
+- Provide reversible actions and undo.
+- Optimize for user value, not engagement inflation.
+
+---
+
+## 20. Definition of Done (Prototype)
+Feature is "done" when:
+- all 5 feature flows are demoable end-to-end,
+- all Must-Pass UAT scenarios pass,
+- event logs support primary metrics,
+- accessibility baseline checks pass,
+- and review completion flow produces explicit closure summary.
+
+This PRD is intended to be directly usable by product, design, and engineering teams for prototype implementation and demo preparation.
