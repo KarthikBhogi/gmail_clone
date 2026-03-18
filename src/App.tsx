@@ -741,7 +741,7 @@ export default function App() {
           </button>
           <div className="flex items-center gap-2">
             <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Gmail_icon_%282020%29.svg/512px-Gmail_icon_%282020%29.svg.png" alt="Gmail" className="h-8 w-8" />
-            <span className="text-2xl font-medium text-gray-600 tracking-tight">Gmail</span>
+            <span className="text-2xl font-medium text-gray-600 tracking-tight">dpm weekly review</span>
           </div>
         </div>
         
