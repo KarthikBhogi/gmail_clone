@@ -1,5 +1,6 @@
 import { MockEmail } from './mockData';
 
+
 type PersistedEmailStateV1 = {
   version: 1;
   statuses: Record<string, { unread: boolean; starred: boolean }>;
