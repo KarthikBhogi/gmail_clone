@@ -84,6 +84,8 @@ const SECONDARY_MODEL_FALLBACKS = [
   'llama-3.1-8b-instant',
 ] as const;
 const GROQ_MODEL_FALLBACKS = [PRIMARY_GPT_MODEL, ...SECONDARY_MODEL_FALLBACKS] as const;
+const GROQ_RATE_LIMIT_COOLDOWN_STORAGE_KEY = 'weekly_review_groq_rate_limit_cooldown_until';
+const DEFAULT_GROQ_RATE_LIMIT_COOLDOWN_MS = 60 * 1000;
 const THEME_STOP_WORDS = new Set([
   'about', 'after', 'also', 'an', 'and', 'any', 'are', 'back', 'before', 'best', 'by', 'can', 'could', 'date', 'details',
   'email', 'emails', 'for', 'from', 'further', 'have', 'hello', 'here', 'hi', 'if', 'in', 'into', 'is', 'it', 'its', 'just',
@@ -185,6 +187,79 @@ function getConfiguredGroqApiKeys(): string[] {
     .filter((key): key is string => Boolean(key));
 
   return Array.from(new Set([legacyBundledKey, ...bundledGroqApiKeys, ...localStorageKeys].filter(Boolean)));
+}
+
+function formatGroqError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Unknown Groq error';
+  }
+}
+
+function isGroqRateLimitError(error: unknown): boolean {
+  const message = formatGroqError(error).toLowerCase();
+  return message.includes('rate limit') || message.includes('rate_limit_exceeded') || message.includes('429');
+}
+
+function getGroqCooldownUntilMs(): number {
+  if (typeof localStorage === 'undefined') {
+    return 0;
+  }
+
+  const stored = localStorage.getItem(GROQ_RATE_LIMIT_COOLDOWN_STORAGE_KEY);
+  if (!stored) {
+    return 0;
+  }
+
+  const parsed = Number(stored);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getGroqCooldownRemainingMs(nowMs = Date.now()): number {
+  const remaining = getGroqCooldownUntilMs() - nowMs;
+  return remaining > 0 ? remaining : 0;
+}
+
+function parseRetryAfterMs(error: unknown): number | null {
+  const message = formatGroqError(error);
+  const minutesAndSeconds = message.match(/Please try again in\s+(\d+)m([\d.]+)s/i);
+  if (minutesAndSeconds) {
+    const minutes = Number(minutesAndSeconds[1]);
+    const seconds = Number(minutesAndSeconds[2]);
+    if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
+      return Math.ceil((minutes * 60 + seconds) * 1000);
+    }
+  }
+
+  const secondsOnly = message.match(/Please try again in\s+([\d.]+)s/i);
+  if (secondsOnly) {
+    const seconds = Number(secondsOnly[1]);
+    if (Number.isFinite(seconds)) {
+      return Math.ceil(seconds * 1000);
+    }
+  }
+
+  return null;
+}
+
+function setGroqCooldownFromError(error: unknown, nowMs = Date.now()): number {
+  const durationMs = Math.max(parseRetryAfterMs(error) ?? DEFAULT_GROQ_RATE_LIMIT_COOLDOWN_MS, DEFAULT_GROQ_RATE_LIMIT_COOLDOWN_MS);
+  const cooldownUntil = nowMs + durationMs;
+
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(GROQ_RATE_LIMIT_COOLDOWN_STORAGE_KEY, String(cooldownUntil));
+  }
+
+  return durationMs;
 }
 
 function getLatestExternalMessage(email: MockEmail): MockEmail['messages'][number] | undefined {
@@ -916,6 +991,51 @@ function normalizeWeeklyReviewData(emails: MockEmail[], data: WeeklyReviewData, 
   };
 }
 
+function buildStabilitySignature(data: WeeklyReviewData): string {
+  const normalized = {
+    themes: [...data.themes]
+      .map((theme) => ({
+        title: theme.title,
+        summary: theme.summary,
+        hasCriticalAction: theme.hasCriticalAction,
+        threadIds: [...theme.threadIds].sort(),
+      }))
+      .sort((left, right) => left.title.localeCompare(right.title)),
+    actions: [...data.actions]
+      .map((action) => ({
+        threadId: action.threadId,
+        summary: action.summary,
+        urgency: action.urgency,
+        dueDate: action.dueDate ?? null,
+      }))
+      .sort((left, right) => left.threadId.localeCompare(right.threadId)),
+  };
+
+  return JSON.stringify(normalized);
+}
+
+function hashSignature(signature: string): string {
+  let hash = 5381;
+  for (let index = 0; index < signature.length; index += 1) {
+    hash = ((hash << 5) + hash) + signature.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0').slice(0, 8);
+}
+
+function logWeeklyReviewStability(data: WeeklyReviewData): void {
+  const signature = buildStabilitySignature(data);
+  const hash = hashSignature(signature);
+  const actionThreadPreview = data.actions.slice(0, 5).map((action) => action.threadId).join(', ');
+  console.info(`Weekly review stability hash: ${hash}`, {
+    actionCount: data.actions.length,
+    themeCount: data.themes.length,
+    actionThreadPreview,
+    signaturePreview: `${signature.slice(0, 120)}${signature.length > 120 ? '...' : ''}`,
+  });
+}
+
 function buildDeterministicWeeklyReview(emails: MockEmail[], referenceNowMs: number, config: WeeklyReviewConfig): WeeklyReviewData {
   const sortedEmails = [...emails].sort((a, b) => getLatestThreadTimestamp(b) - getLatestThreadTimestamp(a));
   const actionsByThreadId = new Map<string, ExtractedAction>();
@@ -1011,7 +1131,13 @@ async function extractWeeklyReviewDataWithGroq(
         return normalizeWeeklyReviewData(emails, parsed, referenceNowMs, config);
       } catch (error) {
         lastError = error;
-        console.warn(`Weekly review: Groq model ${model} failed on key ${index + 1}, trying next key or fallback.`, error);
+        if (isGroqRateLimitError(error)) {
+          const cooldownMs = setGroqCooldownFromError(error);
+          console.warn(`Weekly review: Groq rate limit detected. Cooling down for ${Math.ceil(cooldownMs / 1000)}s before fallback. ${formatGroqError(error)}`);
+          throw error;
+        }
+
+        console.warn(`Weekly review: Groq model ${model} failed on key ${index + 1}, trying next key or fallback. ${formatGroqError(error)}`);
       }
     }
   }
@@ -1075,6 +1201,11 @@ async function generateActionDraftWithGroq(
         };
       } catch (error) {
         lastError = error;
+        if (isGroqRateLimitError(error)) {
+          const cooldownMs = setGroqCooldownFromError(error);
+          console.warn(`Weekly review: draft generation hit Groq rate limit. Cooling down for ${Math.ceil(cooldownMs / 1000)}s before fallback. ${formatGroqError(error)}`);
+          throw error;
+        }
       }
     }
   }
@@ -1086,13 +1217,24 @@ export async function extractWeeklyReviewData(emails: MockEmail[], options: Week
   const referenceNowMs = resolveReferenceNowMs(options.referenceNow);
   const config = getEffectiveReviewConfig(options.config);
   const groqApiKeys = getConfiguredGroqApiKeys();
+  const groqCooldownRemainingMs = getGroqCooldownRemainingMs();
+  let reviewData: WeeklyReviewData;
+
+  if (groqCooldownRemainingMs > 0) {
+    console.info(`Weekly review: skipping Groq extraction during active cooldown (${Math.ceil(groqCooldownRemainingMs / 1000)}s remaining).`);
+    reviewData = buildDeterministicWeeklyReview(emails, referenceNowMs, config);
+    logWeeklyReviewStability(reviewData);
+    return reviewData;
+  }
 
   if (groqApiKeys.length > 0) {
     try {
       console.info(`Weekly review: trying GPT-first extraction across ${groqApiKeys.length} configured key(s), then secondary models.`);
-      return await extractWeeklyReviewDataWithGroq(emails, groqApiKeys, referenceNowMs, config);
+      reviewData = await extractWeeklyReviewDataWithGroq(emails, groqApiKeys, referenceNowMs, config);
+      logWeeklyReviewStability(reviewData);
+      return reviewData;
     } catch (error) {
-      console.warn('Weekly review: all configured Groq keys and fallback models failed, using deterministic fallback.', error);
+      console.warn(`Weekly review: all configured Groq keys and fallback models failed, using deterministic fallback. ${formatGroqError(error)}`);
     }
   }
 
@@ -1101,7 +1243,9 @@ export async function extractWeeklyReviewData(emails: MockEmail[], options: Week
   } else {
     console.warn('Weekly review: all configured Groq keys or models failed, using deterministic fallback.');
   }
-  return buildDeterministicWeeklyReview(emails, referenceNowMs, config);
+  reviewData = buildDeterministicWeeklyReview(emails, referenceNowMs, config);
+  logWeeklyReviewStability(reviewData);
+  return reviewData;
 }
 
 export async function generateActionDraft(
@@ -1114,6 +1258,11 @@ export async function generateActionDraft(
   const config = getEffectiveReviewConfig(options.config);
   const fallbackDraft = buildFallbackActionDraft(email, action, mode, options.recipientHint);
   const groqApiKeys = getConfiguredGroqApiKeys();
+  const groqCooldownRemainingMs = getGroqCooldownRemainingMs();
+
+  if (groqCooldownRemainingMs > 0) {
+    return fallbackDraft;
+  }
 
   if (groqApiKeys.length > 0) {
     try {
@@ -1127,7 +1276,7 @@ export async function generateActionDraft(
         options.recipientHint,
       );
     } catch (error) {
-      console.warn(`Weekly review: failed to generate ${mode} draft with GPT-first Groq routing.`, error);
+      console.warn(`Weekly review: failed to generate ${mode} draft with GPT-first Groq routing. ${formatGroqError(error)}`);
     }
   }
 

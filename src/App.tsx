@@ -346,6 +346,7 @@ export default function App() {
   });
   const [preparingReview, setPreparingReview] = useState(false);
   const [completedReview, setCompletedReview] = useState(() => loadCompletedReview());
+  const [hasPendingActionsInReview, setHasPendingActionsInReview] = useState(false);
   const [reviewActionRecords, setReviewActionRecords] = useState<PersistedThreadActionRecord[]>([]);
   const [reviewDbReady, setReviewDbReady] = useState(false);
   const [demoNow, setDemoNow] = useState<string>('');
@@ -356,6 +357,15 @@ export default function App() {
   const reviewPeriod = getLatestWorkWeekRange(now, weeklyReviewConfig);
   const reviewConfigKey = useMemo(() => getWeeklyReviewConfigKey(weeklyReviewConfig), [weeklyReviewConfig]);
   const reviewReferenceKey = usingDemoTime ? now.toISOString() : `live:${reviewPeriod.key}`;
+  const weeklyReviewReferenceNow = useMemo(() => {
+    if (usingDemoTime) {
+      return now.toISOString();
+    }
+
+    const endOfReviewPeriod = new Date(reviewPeriod.end);
+    endOfReviewPeriod.setHours(23, 59, 59, 999);
+    return endOfReviewPeriod.toISOString();
+  }, [demoNow, reviewPeriod.end, usingDemoTime]);
   const reviewWindowOpen = isInsideWeeklyReviewWindow(now, weeklyReviewSchedule);
   const reviewPeriodStart = new Date(reviewPeriod.start);
   reviewPeriodStart.setHours(0, 0, 0, 0);
@@ -405,6 +415,7 @@ export default function App() {
   const newSincePreparedCount = newEmailsSincePrepared.length;
   const hasCriticalNewSignals = newEmailsSincePrepared.some((email) => URGENT_SIGNAL_REGEX.test(`${email.subject} ${email.snippet}`));
   const isCurrentReviewCompleted = completedReview?.reviewPeriodKey === reviewPeriod.key;
+  const canShowCompletedBadge = isCurrentReviewCompleted && !hasPendingActionsInReview;
   const isReviewBannerReady = reviewWindowOpen && !isCurrentReviewCompleted && bannerDismissedPeriod !== reviewPeriod.key && !snoozeActive;
   const primaryUnread = reviewPeriodEmails.filter((email) => email.unread && email.category === 'primary').length;
   const preparedPreview = isPreparedForCurrentReview && preparedReviewData
@@ -417,7 +428,7 @@ export default function App() {
     setPreparingReview(true);
     try {
       const data = reviewContextEmails.length > 0
-        ? await extractWeeklyReviewData(reviewContextEmails, { referenceNow: now, config: weeklyReviewConfig })
+        ? await extractWeeklyReviewData(reviewContextEmails, { referenceNow: weeklyReviewReferenceNow, config: weeklyReviewConfig })
         : { themes: [], actions: [] };
       const filteredData = suppressCompletedActionsInReviewData(data, reviewContextEmails, reviewActionRecordsByThreadId);
       setPreparedReviewData(filteredData);
@@ -642,6 +653,10 @@ export default function App() {
       void generatePreparedReview('delta-critical');
     }
   }, [hasCriticalNewSignals, isCurrentReviewCompleted, isPreparedForCurrentReview, preparingReview, reviewDbReady, reviewWindowOpen]);
+
+  useEffect(() => {
+    setHasPendingActionsInReview(false);
+  }, [reviewPeriod.key]);
 
   const dismissReviewBanner = () => {
     setBannerDismissedPeriod(reviewPeriod.key);
@@ -931,7 +946,7 @@ export default function App() {
                 >
                   <CheckSquare className={cn("h-5 w-5", currentFolder === 'weekly-review' ? 'text-[#041e49]' : 'text-gray-600')} />
                   {!sidebarCollapsed && (
-                    isCurrentReviewCompleted ? (
+                    canShowCompletedBadge ? (
                       <>
                         <span>Weekly Review</span>
                         <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-700">
@@ -1021,7 +1036,7 @@ export default function App() {
                 emails={reviewContextEmails}
                 allEmails={emails}
                 initialCarryForwardItems={eligibleCarryForwardItems}
-                referenceNow={now.toISOString()}
+                referenceNow={weeklyReviewReferenceNow}
                 referenceNowKey={reviewReferenceKey}
                 reviewConfig={weeklyReviewConfig}
                 reviewPeriodLabel={reviewPeriod.label}
@@ -1029,6 +1044,7 @@ export default function App() {
                 reviewContextKey={reviewContextKey}
                 completedReviewRecord={isCurrentReviewCompleted ? completedReview : null}
                 preloadedData={isPreparedForCurrentReview ? preparedReviewData : null}
+                onPendingActionsChange={setHasPendingActionsInReview}
                 onOpenThread={(threadId) => {
                   setCurrentFolder('inbox');
                   setReviewThreadToOpen(threadId);

@@ -254,6 +254,56 @@ export function loadReviewSession(reviewPeriodKey: string, reviewContextKey: str
   }
 }
 
+export function loadReviewSessionForContext(reviewPeriodKey: string, reviewContextKey: string): PersistedReviewSession | null {
+  try {
+    const raw = localStorage.getItem(getSessionKey(reviewPeriodKey));
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (
+      !isRecord(parsed) ||
+      parsed.version !== 5 ||
+      parsed.reviewPeriodKey !== reviewPeriodKey ||
+      parsed.reviewContextKey !== reviewContextKey ||
+      !isReviewStep(parsed.step) ||
+      !isActionViewMode(parsed.actionViewMode) ||
+      typeof parsed.referenceNowKey !== 'string'
+    ) {
+      return null;
+    }
+
+    if (!Array.isArray(parsed.actions) || !Array.isArray(parsed.expandedThemes) || !Array.isArray(parsed.expandedActions) || !isRecord(parsed.data)) {
+      return null;
+    }
+
+    const actions = parsed.actions
+      .map(normalizePersistedAction)
+      .filter((action): action is PersistedReviewAction => Boolean(action));
+
+    if (actions.length !== parsed.actions.length) {
+      return null;
+    }
+
+    return {
+      version: 5,
+      reviewPeriodKey,
+      reviewContextKey,
+      referenceNowKey: parsed.referenceNowKey,
+      step: parsed.step,
+      actionViewMode: parsed.actionViewMode,
+      actions,
+      data: parsed.data as unknown as WeeklyReviewData,
+      expandedThemes: parsed.expandedThemes.filter((value): value is string => typeof value === 'string'),
+      expandedActions: parsed.expandedActions.filter((value): value is string => typeof value === 'string'),
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function saveReviewSession(
   reviewPeriodKey: string,
   reviewContextKey: string,

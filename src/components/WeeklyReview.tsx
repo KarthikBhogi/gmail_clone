@@ -26,6 +26,7 @@ import {
   CarryForwardItem,
   clearReviewSession,
   CompletedReviewRecord,
+  loadReviewSessionForContext,
   loadReviewSession,
   PersistedActionStatus,
   ReviewActionArtifact,
@@ -51,6 +52,7 @@ interface WeeklyReviewProps {
   reviewPeriodKey: string;
   preloadedData?: WeeklyReviewData | null;
   onOpenThread?: (threadId: string) => void;
+  onPendingActionsChange?: (hasPendingActions: boolean) => void;
   onComplete: (result: ReviewCompletionResult) => void;
 }
 
@@ -193,6 +195,7 @@ export function WeeklyReview({
   reviewPeriodKey,
   preloadedData = null,
   onOpenThread,
+  onPendingActionsChange,
 }: WeeklyReviewProps) {
   const [data, setData] = useState<WeeklyReviewData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -251,12 +254,13 @@ export function WeeklyReview({
     return getLatestExternalActivityTimestampForEmail(email) <= record.latestExternalActivityTs;
   }, [actionHistoryByThreadId, emailById]);
 
-  const applyHydratedReview = useCallback((result: WeeklyReviewData) => {
+  const applyHydratedReview = useCallback((result: WeeklyReviewData, persistedActionsByThreadId: Map<string, PersistedReviewAction> = new Map()) => {
     const hydratedActions = result.actions
       .filter((action) => !shouldSuppressResolvedThread(action.threadId, carryForwardByThreadId.has(action.threadId)))
       .map((action) => {
       const carryForwardItem = carryForwardByThreadId.get(action.threadId);
       const completedDecision = completedDecisionByThreadId.get(action.threadId);
+      const persistedAction = persistedActionsByThreadId.get(action.threadId);
       const isCarriedIn = Boolean(carryForwardItem);
       // Detect fresh external activity since the item was carried forward.
       let hasNewActivity = false;
@@ -274,11 +278,11 @@ export function WeeklyReview({
         urgency: carryForwardItem && action.urgency === 'Low' ? carryForwardItem.urgency : action.urgency,
         dueDate: action.dueDate ?? carryForwardItem?.dueDate,
         confidence: action.confidence,
-        status: completedDecision?.status ?? normalizeActionStatus(action.status),
-        snoozeDate: carryForwardItem?.snoozeDate,
+        status: completedDecision?.status ?? persistedAction?.status ?? normalizeActionStatus(action.status),
+        snoozeDate: persistedAction?.snoozeDate ?? carryForwardItem?.snoozeDate,
         carriedIn: isCarriedIn,
         hasNewActivity,
-        completionArtifact: completedDecision?.artifact,
+        completionArtifact: completedDecision?.artifact ?? persistedAction?.completionArtifact,
       } as ReviewAction;
     });
 
@@ -302,11 +306,11 @@ export function WeeklyReview({
         urgency: item.urgency,
         dueDate: item.dueDate,
         confidence: item.confidence,
-        status: completedDecisionByThreadId.get(item.threadId)?.status ?? 'pending',
-        snoozeDate: item.snoozeDate,
+        status: completedDecisionByThreadId.get(item.threadId)?.status ?? persistedActionsByThreadId.get(item.threadId)?.status ?? 'pending',
+        snoozeDate: persistedActionsByThreadId.get(item.threadId)?.snoozeDate ?? item.snoozeDate,
         carriedIn: true,
         hasNewActivity,
-        completionArtifact: completedDecisionByThreadId.get(item.threadId)?.artifact,
+        completionArtifact: completedDecisionByThreadId.get(item.threadId)?.artifact ?? persistedActionsByThreadId.get(item.threadId)?.completionArtifact,
       });
     }
 
@@ -318,33 +322,21 @@ export function WeeklyReview({
     setExpandedActions(new Set());
   }, [carryForwardByThreadId, completedDecisionByThreadId, emailById, initialCarryForwardItems, shouldSuppressResolvedThread]);
 
-  const restoreReviewSession = useCallback(() => {
-    const stored = loadReviewSession(reviewPeriodKey, reviewContextKey, referenceNowKey);
-    if (!stored) {
-      return false;
-    }
-
-    const filteredStoredActions = stored.actions.filter((action) => !shouldSuppressResolvedThread(action.threadId));
-    setData(stored.data);
-    setActions(filteredStoredActions);
-    setStep(stored.step);
-    setActionViewMode(stored.actionViewMode);
-    setExpandedThemes(new Set(stored.expandedThemes));
-    setExpandedActions(new Set(stored.expandedActions));
-    return true;
-  }, [referenceNowKey, reviewContextKey, reviewPeriodKey, shouldSuppressResolvedThread]);
-
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-
-      if (restoreReviewSession()) {
-        return;
-      }
-
+      const exactSession = loadReviewSession(reviewPeriodKey, reviewContextKey, referenceNowKey);
+      const contextSession = exactSession ?? loadReviewSessionForContext(reviewPeriodKey, reviewContextKey);
+      const persistedActionsByThreadId = new Map((contextSession?.actions ?? []).map((action) => [action.threadId, action]));
       const result = preloadedData || await extractWeeklyReviewData(emails, { referenceNow, config: reviewConfig });
-      applyHydratedReview(result);
+      applyHydratedReview(result, persistedActionsByThreadId);
+      if (contextSession) {
+        setStep(contextSession.step);
+        setActionViewMode(contextSession.actionViewMode);
+        setExpandedThemes(new Set(contextSession.expandedThemes));
+        setExpandedActions(new Set(contextSession.expandedActions));
+      }
       if (!preloadedData) {
         trackEvent('weekly_trigger_started');
       }
@@ -354,7 +346,7 @@ export function WeeklyReview({
     } finally {
       setLoading(false);
     }
-  }, [applyHydratedReview, emails, preloadedData, referenceNow, restoreReviewSession, reviewConfig]);
+  }, [applyHydratedReview, emails, preloadedData, referenceNow, referenceNowKey, reviewConfig, reviewContextKey, reviewPeriodKey]);
 
   useEffect(() => {
     fetchData();
@@ -390,6 +382,7 @@ export function WeeklyReview({
 
 
   const pendingActions = useMemo(() => actions.filter((a) => a.status === 'pending'), [actions]);
+  const canShowReviewCompleted = Boolean(completedReviewRecord) && pendingActions.length === 0;
   const carriedInCount = useMemo(() => actions.filter((a) => a.carriedIn).length, [actions]);
   const unresolvedActions = useMemo(() => actions.filter((a) => a.status === 'pending' || a.status === 'carry-forward'), [actions]);
   const followThroughArtifacts = useMemo(
@@ -421,6 +414,10 @@ export function WeeklyReview({
       return order[a.urgency] - order[b.urgency];
     });
   }, [actions]);
+
+  useEffect(() => {
+    onPendingActionsChange?.(pendingActions.length > 0);
+  }, [onPendingActionsChange, pendingActions.length]);
 
   const themeTitleByThreadId = useMemo(() => {
     const map = new Map<string, string>();
@@ -1066,7 +1063,7 @@ export function WeeklyReview({
             <h1 className="text-2xl font-semibold text-gray-900">Weekly Review</h1>
             <div className="flex items-center gap-2 mt-1">
               <p className="text-sm text-gray-500">{reviewPeriodLabel} - {emails.length} emails in scope</p>
-              {completedReviewRecord && (
+              {canShowReviewCompleted && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
                   ✓ Review Completed
                 </span>
