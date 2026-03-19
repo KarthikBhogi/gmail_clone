@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Inbox } from './components/Inbox';
+import { PMMetrics } from './components/PMMetrics';
 import { ReviewCompletionResult, WeeklyReview } from './components/WeeklyReview';
-import { Menu, Search, Settings, HelpCircle, Grid, Inbox as InboxIcon, Send, File, CheckSquare, Star, Clock, Tag, Plus, ChevronDown, X, PenLine, Calendar, ListTodo, Info, Users } from 'lucide-react';
+import { Menu, Search, Settings, HelpCircle, Grid, Inbox as InboxIcon, Send, File, CheckSquare, Star, Clock, Tag, Plus, ChevronDown, X, PenLine, Calendar, ListTodo, Info, Users, BarChart2 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { mockEmails as initialEmails, MockEmail } from './services/mockData';
 import { extractWeeklyReviewData, WeeklyReviewData } from './services/weeklyReviewService';
@@ -236,7 +237,7 @@ function isInsideWeeklyReviewWindow(date: Date, schedule: WeeklyReviewSchedule):
 }
 
 export default function App() {
-  type MailFolder = 'inbox' | 'starred' | 'snoozed' | 'sent' | 'drafts' | 'weekly-review' | 'purchases';
+  type MailFolder = 'inbox' | 'starred' | 'snoozed' | 'sent' | 'drafts' | 'weekly-review' | 'purchases' | 'pm-metrics';
 
   const [fetchingEmails, setFetchingEmails] = useState(false);
   const [currentFolder, setCurrentFolder] = useState<MailFolder>('inbox');
@@ -967,6 +968,20 @@ export default function App() {
                   )}
                 </button>
               </li>
+              <li>
+                <button
+                  onClick={() => setCurrentFolder('pm-metrics')}
+                  title="PM Metrics"
+                  className={cn(
+                    'w-full flex items-center text-sm mt-1 mb-2',
+                    sidebarCollapsed ? 'justify-center py-2 rounded-full' : 'gap-4 px-6 py-1.5 rounded-r-full',
+                    currentFolder === 'pm-metrics' ? 'bg-[#d3e3fd] text-[#041e49] font-semibold' : 'text-gray-700 hover:bg-gray-100'
+                  )}
+                >
+                  <BarChart2 className={cn("h-5 w-5", currentFolder === 'pm-metrics' ? 'text-[#041e49]' : 'text-gray-600')} />
+                  {!sidebarCollapsed && 'PM Metrics'}
+                </button>
+              </li>
             </ul>
 
             <div className={cn('mt-6', sidebarCollapsed && 'hidden')}>
@@ -1022,6 +1037,8 @@ export default function App() {
                 }}
                 onComplete={handleWeeklyReviewComplete}
               />
+          ) : currentFolder === 'pm-metrics' ? (
+            <PMMetrics />
           ) : (
             <Inbox 
               folder={currentFolder} 
