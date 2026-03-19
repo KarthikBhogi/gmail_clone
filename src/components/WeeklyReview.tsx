@@ -278,11 +278,11 @@ export function WeeklyReview({
         urgency: carryForwardItem && action.urgency === 'Low' ? carryForwardItem.urgency : action.urgency,
         dueDate: action.dueDate ?? carryForwardItem?.dueDate,
         confidence: action.confidence,
-        status: completedDecision?.status ?? persistedAction?.status ?? normalizeActionStatus(action.status),
+        status: persistedAction?.status ?? completedDecision?.status ?? normalizeActionStatus(action.status),
         snoozeDate: persistedAction?.snoozeDate ?? carryForwardItem?.snoozeDate,
         carriedIn: isCarriedIn,
         hasNewActivity,
-        completionArtifact: completedDecision?.artifact ?? persistedAction?.completionArtifact,
+        completionArtifact: persistedAction?.completionArtifact ?? completedDecision?.artifact,
       } as ReviewAction;
     });
 
@@ -306,11 +306,11 @@ export function WeeklyReview({
         urgency: item.urgency,
         dueDate: item.dueDate,
         confidence: item.confidence,
-        status: completedDecisionByThreadId.get(item.threadId)?.status ?? persistedActionsByThreadId.get(item.threadId)?.status ?? 'pending',
+        status: persistedActionsByThreadId.get(item.threadId)?.status ?? completedDecisionByThreadId.get(item.threadId)?.status ?? 'pending',
         snoozeDate: persistedActionsByThreadId.get(item.threadId)?.snoozeDate ?? item.snoozeDate,
         carriedIn: true,
         hasNewActivity,
-        completionArtifact: completedDecisionByThreadId.get(item.threadId)?.artifact ?? persistedActionsByThreadId.get(item.threadId)?.completionArtifact,
+        completionArtifact: persistedActionsByThreadId.get(item.threadId)?.completionArtifact ?? completedDecisionByThreadId.get(item.threadId)?.artifact,
       });
     }
 
